@@ -20,7 +20,7 @@ func GetEnhancedConnFromContext(ctx context.Context) (*EnhancedConn, error) {
 
 	proxyConn, ok := val.(*EnhancedConn)
 	if !ok {
-		return nil, errors.New("val must be proxyConn")
+		return nil, errors.New("val must be enhanced conn")
 	}
 
 	return proxyConn, nil
