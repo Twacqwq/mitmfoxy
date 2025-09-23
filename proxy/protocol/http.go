@@ -1,12 +1,11 @@
 package protocol
 
 import (
-	"context"
 	"io"
 	"maps"
-	"net"
 	"net/http"
 
+	"github.com/Twacqwq/mitmfoxy/internal/netutil"
 	"github.com/Twacqwq/mitmfoxy/proxy/connection"
 	"github.com/sirupsen/logrus"
 )
@@ -17,18 +16,10 @@ type HTTPHandler struct{}
 func (h *HTTPHandler) Handle(w http.ResponseWriter, r *http.Request, session *connection.ConnSession) error {
 	logrus.Infof("Req: %+v", r)
 
-	if session.HTTPClient == nil {
-		session.HTTPClient = &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					return session.DialFn.Dial(ctx, r)
-				},
-				DisableCompression: true,
-			},
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+	addr := netutil.JoinHostPort(r.URL)
+	serverConn, err := session.GetOrCreateServerConn(r.Context(), r, addr)
+	if err != nil {
+		return err
 	}
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
@@ -37,7 +28,7 @@ func (h *HTTPHandler) Handle(w http.ResponseWriter, r *http.Request, session *co
 	}
 	proxyReq.Header = r.Header
 
-	proxyResp, err := session.HTTPClient.Do(proxyReq)
+	proxyResp, err := serverConn.HTTPClient.Do(proxyReq)
 	if err != nil {
 		return err
 	}
@@ -50,5 +41,10 @@ func (h *HTTPHandler) Handle(w http.ResponseWriter, r *http.Request, session *co
 	w.WriteHeader(proxyResp.StatusCode)
 
 	_, err = io.Copy(w, proxyResp.Body)
-	return err
+	if err != nil {
+		return err
+	}
+
+	session.PutServerConn(addr, serverConn)
+	return nil
 }

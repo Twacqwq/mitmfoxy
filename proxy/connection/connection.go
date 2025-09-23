@@ -5,6 +5,9 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // EnhancedConn is a net.Conn with buffered reader and connection session
@@ -46,10 +49,62 @@ type ConnSession struct {
 	// DialFn is used to dial connections
 	DialFn Dialer
 
+	// serverConnPool is used to pool server connections
+	serverConnPool *ServerConnPool
+}
+
+// GetOrCreateServerConn returns a server connection for the given address
+func (c *ConnSession) GetOrCreateServerConn(ctx context.Context, r *http.Request, addr string) (*serverConn, error) {
+	logrus.Debugf("ServerConnPool: %+v", c.serverConnPool)
+
+	// Try to get from the connection pool first
+	if conn := c.serverConnPool.Get(addr); conn != nil {
+		return conn, nil
+	}
+
+	// Dial a new connection
+	rawConn, err := c.DialFn.Dial(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+
+	//
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return rawConn, nil
+			},
+			DisableCompression: true,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	return NewServerConn(rawConn, httpClient), nil
+}
+
+// PutServerConn puts a server connection back into the pool
+func (c *ConnSession) PutServerConn(addr string, conn *serverConn) {
+	c.serverConnPool.Put(addr, conn)
+}
+
+func NewConnSession() *ConnSession {
+	return &ConnSession{
+		serverConnPool: NewServerConnPool(1<<10, 10*time.Second),
+	}
+}
+
+type serverConn struct {
+	net.Conn
+
 	// HTTPClient is used to make HTTP requests
 	HTTPClient *http.Client
 }
 
-func NewConnSession() *ConnSession {
-	return &ConnSession{}
+func NewServerConn(c net.Conn, client *http.Client) *serverConn {
+	return &serverConn{
+		Conn:       c,
+		HTTPClient: client,
+	}
 }

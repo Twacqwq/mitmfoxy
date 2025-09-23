@@ -64,6 +64,17 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	enhancedConn := connection.MustGetEnhancedConnFromContext(r.Context())
 	session := enhancedConn.GetSession()
 
+	if r.Method == http.MethodConnect {
+		if len(r.URL.Scheme) == 0 {
+			r.URL.Scheme = "https"
+		}
+	} else {
+		if !r.URL.IsAbs() || len(r.Host) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+
 	// get handler with scheme
 	handler, ok := p.protocols[r.URL.Scheme]
 	if !ok {
