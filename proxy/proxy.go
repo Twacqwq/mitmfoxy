@@ -43,6 +43,7 @@ func New(conf *Config) *proxy {
 
 	// register protocol handler
 	p.RegisterProtocolHandler("http", &protocol.HTTPHandler{})
+	p.RegisterProtocolHandler("https", &protocol.TlsHandler{})
 
 	p.server.Handler = p
 	return p
@@ -64,9 +65,14 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	enhancedConn := connection.MustGetEnhancedConnFromContext(r.Context())
 	session := enhancedConn.GetSession()
 
+	if len(r.URL.Scheme) == 0 {
+		r.URL.Scheme = "https"
+	}
+
 	// get handler with scheme
 	handler, ok := p.protocols[r.URL.Scheme]
 	if !ok {
+		logrus.Errorf("Unsupported protocol: %s", r.URL.Scheme)
 		http.Error(w, "Unsupported protocol", http.StatusBadRequest)
 		return
 	}
