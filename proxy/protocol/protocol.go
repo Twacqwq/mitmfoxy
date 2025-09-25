@@ -9,6 +9,6 @@ import (
 // Handler is the interface that wraps the Handle method.
 type Handler interface {
 	// Handle handles the request and writes response to w.
-	// The session contains connection-specific data.
-	Handle(w http.ResponseWriter, r *http.Request, session *connection.ConnSession) error
+	// The enhancedConn contains connection-specific data.
+	Handle(w http.ResponseWriter, r *http.Request, enhancedConn *connection.EnhancedConn) error
 }

@@ -42,7 +42,8 @@ func New(conf *Config) *proxy {
 	}
 
 	// register protocol handler
-	p.RegisterProtocolHandler("http", &protocol.HTTPHandler{})
+	p.RegisterProtocolHandler("http", protocol.NewHTTPHandler())
+	p.RegisterProtocolHandler("https", protocol.NewTLSHandler())
 
 	p.server.Handler = p
 	return p
@@ -62,7 +63,6 @@ func (p *proxy) Start() error {
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// get enhanced conn from context
 	enhancedConn := connection.MustGetEnhancedConnFromContext(r.Context())
-	session := enhancedConn.GetSession()
 
 	if r.Method == http.MethodConnect {
 		if len(r.URL.Scheme) == 0 {
@@ -82,12 +82,12 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if session.DialFn == nil {
-		session.DialFn = p
+	if enhancedConn.Session.Dialer == nil {
+		enhancedConn.Session.Dialer = p
 	}
 
 	// handle request
-	if err := handler.Handle(w, r, session); err != nil {
+	if err := handler.Handle(w, r, enhancedConn); err != nil {
 		logrus.Errorf("Protocol handling error: %v", err)
 		http.Error(w, err.Error(), http.StatusBadGateway)
 	}

@@ -1,40 +1,23 @@
 package connection
 
 import (
-	"bufio"
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
-	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
-// EnhancedConn is a net.Conn with buffered reader and connection session
+// EnhancedConn is a net.Conn with connection session
 type EnhancedConn struct {
 	net.Conn
 
-	bufr    *bufio.Reader
-	session *ConnSession
-}
-
-// Peek n bytes from the connection without consuming them
-func (e *EnhancedConn) Peek(n int) ([]byte, error) {
-	return e.bufr.Peek(n)
-}
-
-// GetSession returns the connection session
-func (e *EnhancedConn) GetSession() *ConnSession {
-	return e.session
+	Session *ProxyConnSession
 }
 
 func NewEnhancedConn(c net.Conn) *EnhancedConn {
-	connSession := NewConnSession()
-
 	return &EnhancedConn{
 		Conn:    c,
-		bufr:    bufio.NewReader(c),
-		session: connSession,
+		Session: NewProxyConnSession(c),
 	}
 }
 
@@ -44,67 +27,58 @@ type Dialer interface {
 	Dial(context.Context, *http.Request) (net.Conn, error)
 }
 
-// ConnSession holds session-specific data for a connection
-type ConnSession struct {
-	// DialFn is used to dial connections
-	DialFn Dialer
+// ProxyConnSession is a session for a proxy connection
+type ProxyConnSession struct {
+	Dialer
 
-	// serverConnPool is used to pool server connections
-	serverConnPool *ServerConnPool
+	ClientConn *ProxyClientConn
+	ServerConn *ProxyServerConn
 }
 
-// GetOrCreateServerConn returns a server connection for the given address
-func (c *ConnSession) GetOrCreateServerConn(ctx context.Context, r *http.Request, addr string) (*serverConn, error) {
-	logrus.Debugf("ServerConnPool: %+v", c.serverConnPool)
-
-	// Try to get from the connection pool first
-	if conn := c.serverConnPool.Get(addr); conn != nil {
-		return conn, nil
+func NewProxyConnSession(c net.Conn) *ProxyConnSession {
+	return &ProxyConnSession{
+		ClientConn: NewProxyClientConn(c),
 	}
+}
 
-	// Dial a new connection
-	rawConn, err := c.DialFn.Dial(ctx, r)
-	if err != nil {
-		return nil, err
+// ProxyClientConn is a connection from the client to the proxy
+type ProxyClientConn struct {
+	ID              string
+	ClientHelloInfo *tls.ClientHelloInfo
+	Conn            net.Conn
+	TlsConn         *tls.Conn
+	IsTLS           bool
+}
+
+func NewProxyClientConn(c net.Conn) *ProxyClientConn {
+	return &ProxyClientConn{
+		Conn: c,
 	}
+}
 
-	//
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return rawConn, nil
+// ProxyServerConn is a connection from the proxy to the server
+type ProxyServerConn struct {
+	ID           string
+	TlsConn      *tls.Conn
+	TlsConnState *tls.ConnectionState
+	Addr         string
+	Client       *http.Client
+	Conn         net.Conn
+}
+
+func NewProxyServerConn(c net.Conn) *ProxyServerConn {
+	return &ProxyServerConn{
+		Conn: c,
+		Client: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return c, nil
+				},
+				DisableCompression: true,
 			},
-			DisableCompression: true,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	return NewServerConn(rawConn, httpClient), nil
-}
-
-// PutServerConn puts a server connection back into the pool
-func (c *ConnSession) PutServerConn(addr string, conn *serverConn) {
-	c.serverConnPool.Put(addr, conn)
-}
-
-func NewConnSession() *ConnSession {
-	return &ConnSession{
-		serverConnPool: NewServerConnPool(1<<10, 10*time.Second),
-	}
-}
-
-type serverConn struct {
-	net.Conn
-
-	// HTTPClient is used to make HTTP requests
-	HTTPClient *http.Client
-}
-
-func NewServerConn(c net.Conn, client *http.Client) *serverConn {
-	return &serverConn{
-		Conn:       c,
-		HTTPClient: client,
 	}
 }

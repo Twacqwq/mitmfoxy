@@ -8,8 +8,13 @@ import (
 // contextKey is a type for context keys to avoid collisions
 type contextKey struct{ name string }
 
-// EnhancedConnContextKey is the context key for EnhancedConn
-var EnhancedConnContextKey = &contextKey{"enhanced-conn"}
+var (
+	// EnhancedConnContextKey is the context key for EnhancedConn
+	EnhancedConnContextKey = &contextKey{"enhanced-conn"}
+
+	// TLSConnContextKey is the context key for TLSConn forward
+	TLSConnContextKey = &contextKey{"tls-conn"}
+)
 
 // GetEnhancedConnFromContext retrieves the EnhancedConn from the context
 func GetEnhancedConnFromContext(ctx context.Context) (*EnhancedConn, error) {

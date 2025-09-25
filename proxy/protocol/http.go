@@ -5,22 +5,21 @@ import (
 	"maps"
 	"net/http"
 
-	"github.com/Twacqwq/mitmfoxy/internal/netutil"
 	"github.com/Twacqwq/mitmfoxy/proxy/connection"
 	"github.com/sirupsen/logrus"
 )
 
 // HTTPHandler is a handler for HTTP protocol
-type HTTPHandler struct{}
+type httpHandler struct{}
 
-func (h *HTTPHandler) Handle(w http.ResponseWriter, r *http.Request, session *connection.ConnSession) error {
+func (h *httpHandler) Handle(w http.ResponseWriter, r *http.Request, enhancedConn *connection.EnhancedConn) error {
 	logrus.Infof("Req: %+v", r)
 
-	addr := netutil.JoinHostPort(r.URL)
-	serverConn, err := session.GetOrCreateServerConn(r.Context(), r, addr)
+	ServerConn, err := enhancedConn.Session.Dialer.Dial(r.Context(), r)
 	if err != nil {
 		return err
 	}
+	enhancedConn.Session.ServerConn = connection.NewProxyServerConn(ServerConn)
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
 	if err != nil {
@@ -28,7 +27,7 @@ func (h *HTTPHandler) Handle(w http.ResponseWriter, r *http.Request, session *co
 	}
 	proxyReq.Header = r.Header
 
-	proxyResp, err := serverConn.HTTPClient.Do(proxyReq)
+	proxyResp, err := enhancedConn.Session.ServerConn.Client.Do(proxyReq)
 	if err != nil {
 		return err
 	}
@@ -45,6 +44,9 @@ func (h *HTTPHandler) Handle(w http.ResponseWriter, r *http.Request, session *co
 		return err
 	}
 
-	session.PutServerConn(addr, serverConn)
 	return nil
+}
+
+func NewHTTPHandler() Handler {
+	return &httpHandler{}
 }
