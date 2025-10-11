@@ -23,6 +23,10 @@ type Manager struct {
 
 // GetCert issue a certificate based on the upstream server's SNI (continuous optimization)
 func (m *Manager) GetCert(serverName string) (*tls.Certificate, error) {
+	if m.certBlock == nil || m.keyBlock == nil {
+		return nil, errors.New("failed to load pem block")
+	}
+
 	if val, ok := m.store.Load(serverName); ok {
 		return val.(*tls.Certificate), nil
 	}
@@ -81,6 +85,7 @@ func NewManager(certPath, keyPath string) (*Manager, error) {
 	}
 
 	return &Manager{
+		store:     sync.Map{},
 		certBlock: rootCertBlock,
 		keyBlock:  rootKeyBlock,
 	}, nil

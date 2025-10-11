@@ -51,8 +51,7 @@ func New(conf *Config) *proxy {
 	// init cert manager
 	certManager, err := cert.NewManager(conf.CertFile, conf.KeyFile)
 	if err != nil {
-		logrus.Error(err)
-		panic(err)
+		certManager = &cert.Manager{}
 	}
 
 	// register protocol handler
