@@ -11,37 +11,23 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"sync"
 	"time"
 )
 
-// TODO Load the certificate based on the operating system
-// TODO Memory cache of site certificates for established handshakes to speed up request reuse
-type Cert struct {
+// Cert Manager
+type Manager struct {
+	certBlock, keyBlock *pem.Block
+	store               sync.Map
 }
 
 // GetCert issue a certificate based on the upstream server's SNI (continuous optimization)
-func GetCert(serverName string) (*tls.Certificate, error) {
-	rootCertPEM, err := os.ReadFile("./internal/cert/ca.crt")
-	if err != nil {
-		return nil, err
+func (m *Manager) GetCert(serverName string) (*tls.Certificate, error) {
+	if val, ok := m.store.Load(serverName); ok {
+		return val.(*tls.Certificate), nil
 	}
 
-	rootKeyPEM, err := os.ReadFile("./internal/cert/ca.key")
-	if err != nil {
-		return nil, err
-	}
-
-	rootCertBlock, _ := pem.Decode(rootCertPEM)
-	if rootCertBlock == nil {
-		return nil, errors.New("failed to decode root certificate")
-	}
-
-	rootKeyBlock, _ := pem.Decode(rootKeyPEM)
-	if rootKeyBlock == nil {
-		return nil, errors.New("failed to decode root key")
-	}
-
-	rootCert, err := x509.ParseCertificate(rootCertBlock.Bytes)
+	rootCert, err := x509.ParseCertificate(m.certBlock.Bytes)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +39,7 @@ func GetCert(serverName string) (*tls.Certificate, error) {
 		rootCert.DNSNames = []string{serverName}
 	}
 
-	rootKey, err := x509.ParsePKCS8PrivateKey(rootKeyBlock.Bytes)
+	rootKey, err := x509.ParsePKCS8PrivateKey(m.keyBlock.Bytes)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +54,36 @@ func GetCert(serverName string) (*tls.Certificate, error) {
 		return nil, err
 	}
 
+	m.store.Store(serverName, &certificate)
+
 	return &certificate, nil
+}
+
+func NewManager(certPath, keyPath string) (*Manager, error) {
+	rootCertPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+
+	rootKeyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	rootCertBlock, _ := pem.Decode(rootCertPEM)
+	if rootCertBlock == nil {
+		return nil, errors.New("failed to decode root certificate")
+	}
+
+	rootKeyBlock, _ := pem.Decode(rootKeyPEM)
+	if rootKeyBlock == nil {
+		return nil, errors.New("failed to decode root key")
+	}
+
+	return &Manager{
+		certBlock: rootCertBlock,
+		keyBlock:  rootKeyBlock,
+	}, nil
 }
 
 func generateCert(rootCert *x509.Certificate, rootKey *rsa.PrivateKey, serverName string) ([]byte, []byte, error) {

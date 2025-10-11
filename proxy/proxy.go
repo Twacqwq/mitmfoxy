@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/Twacqwq/mitmfoxy/internal/cert"
 	"github.com/Twacqwq/mitmfoxy/internal/netutil"
 	"github.com/Twacqwq/mitmfoxy/proxy/connection"
 	"github.com/Twacqwq/mitmfoxy/proxy/protocol"
@@ -17,6 +18,12 @@ import (
 type Config struct {
 	// proxy listen addr
 	Addr string
+
+	// cert file
+	CertFile string
+
+	// key file
+	KeyFile string
 }
 
 type proxy struct {
@@ -41,9 +48,16 @@ func New(conf *Config) *proxy {
 		protocols: make(map[string]protocol.Handler),
 	}
 
+	// init cert manager
+	certManager, err := cert.NewManager(conf.CertFile, conf.KeyFile)
+	if err != nil {
+		logrus.Error(err)
+		panic(err)
+	}
+
 	// register protocol handler
 	p.RegisterProtocolHandler("http", protocol.NewHTTPHandler())
-	p.RegisterProtocolHandler("https", protocol.NewTLSHandler())
+	p.RegisterProtocolHandler("https", protocol.NewTLSHandler(certManager))
 
 	p.server.Handler = p
 	return p

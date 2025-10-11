@@ -16,6 +16,7 @@ import (
 type tlsHandler struct {
 	server      *http.Server
 	tlsListener *tlsListener
+	certManager *cert.Manager
 }
 
 func (t *tlsHandler) Handle(w http.ResponseWriter, r *http.Request, enhancedConn *connection.EnhancedConn) error {
@@ -74,7 +75,7 @@ func (t *tlsHandler) Handshake(ctx context.Context, hijackConn net.Conn, enhance
 			close(chErr)
 
 			logrus.Infof("SNI: %s", chi.ServerName)
-			c, err := cert.GetCert(chi.ServerName)
+			c, err := t.certManager.GetCert(chi.ServerName)
 			if err != nil {
 				logrus.Errorf("get cert error: %v", err)
 				return nil, err
@@ -186,11 +187,12 @@ func (t *tlsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewTLSHandler() Handler {
+func NewTLSHandler(certManager *cert.Manager) Handler {
 	handler := &tlsHandler{
 		tlsListener: &tlsListener{
 			chConn: make(chan net.Conn),
 		},
+		certManager: certManager,
 	}
 	handler.server = &http.Server{
 		Handler: handler,
