@@ -57,13 +57,16 @@ func New(conf *Config) *proxy {
 		certManager = &cert.Manager{}
 	}
 
+	// init packet capture websocket
+	pcw := protocol.NewPacketCaptureWebsocket(conf.UseWebsocket)
+
 	// register protocol handler
-	p.RegisterProtocolHandler("http", protocol.NewHTTPHandler())
-	p.RegisterProtocolHandler("https", protocol.NewTLSHandler(certManager))
+	p.RegisterProtocolHandler("http", protocol.NewHTTPHandler(pcw))
+	p.RegisterProtocolHandler("https", protocol.NewTLSHandler(certManager, pcw))
 
 	mux := http.NewServeMux()
 	mux.Handle("/", p)
-	mux.Handle("/ws", protocol.NewPacketCaptureWebsocket(conf.UseWebsocket))
+	mux.Handle("/ws", pcw)
 
 	p.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodConnect {

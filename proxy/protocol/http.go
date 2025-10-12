@@ -1,27 +1,30 @@
 package protocol
 
 import (
+	"bytes"
 	"io"
 	"maps"
 	"net/http"
 
+	"github.com/Twacqwq/mitmfoxy/internal/model"
 	"github.com/Twacqwq/mitmfoxy/proxy/connection"
-	"github.com/sirupsen/logrus"
 )
 
 // HTTPHandler is a handler for HTTP protocol
-type httpHandler struct{}
+type httpHandler struct {
+	pcw *PacketCaptureWebSocket
+}
 
 func (h *httpHandler) Handle(w http.ResponseWriter, r *http.Request, enhancedConn *connection.EnhancedConn) error {
-	logrus.Infof("Req: %+v", r)
-
 	ServerConn, err := enhancedConn.Session.Dialer.Dial(r.Context(), r)
 	if err != nil {
 		return err
 	}
 	enhancedConn.Session.ServerConn = connection.NewProxyServerConn(ServerConn)
 
-	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
+	var reqBuf bytes.Buffer
+	reqBody := io.TeeReader(r.Body, &reqBuf)
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), reqBody)
 	if err != nil {
 		return err
 	}
@@ -33,20 +36,31 @@ func (h *httpHandler) Handle(w http.ResponseWriter, r *http.Request, enhancedCon
 	}
 	defer proxyResp.Body.Close()
 
-	logrus.Infof("Resp: %+v", proxyResp)
+	var respBuf bytes.Buffer
+	respBody := io.TeeReader(proxyResp.Body, &respBuf)
 
 	// copy response header to writer
 	maps.Copy(w.Header(), proxyResp.Header)
 	w.WriteHeader(proxyResp.StatusCode)
 
-	_, err = io.Copy(w, proxyResp.Body)
+	_, err = io.Copy(w, respBody)
 	if err != nil {
 		return err
 	}
 
+	go func() {
+		if !h.pcw.enabled {
+			return
+		}
+		flow := model.BuildPacketCaptureFlow(proxyResp, r, &reqBuf, &respBuf)
+		h.pcw.BroadcastJSON(flow)
+	}()
+
 	return nil
 }
 
-func NewHTTPHandler() Handler {
-	return &httpHandler{}
+func NewHTTPHandler(pcw *PacketCaptureWebSocket) Handler {
+	return &httpHandler{
+		pcw: pcw,
+	}
 }

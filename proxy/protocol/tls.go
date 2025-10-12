@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/Twacqwq/mitmfoxy/internal/cert"
+	"github.com/Twacqwq/mitmfoxy/internal/model"
 	"github.com/Twacqwq/mitmfoxy/proxy/connection"
 	"github.com/sirupsen/logrus"
 )
@@ -17,6 +19,7 @@ type tlsHandler struct {
 	server      *http.Server
 	tlsListener *tlsListener
 	certManager *cert.Manager
+	pcw         *PacketCaptureWebSocket
 }
 
 func (t *tlsHandler) Handle(w http.ResponseWriter, r *http.Request, enhancedConn *connection.EnhancedConn) error {
@@ -157,7 +160,9 @@ func (t *tlsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Scheme = "https"
 	}
 
-	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
+	var reqBuf bytes.Buffer
+	reqBody := io.TeeReader(r.Body, &reqBuf)
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), reqBody)
 	if err != nil {
 		logrus.Error(err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -173,26 +178,36 @@ func (t *tlsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer proxyResp.Body.Close()
 
-	logrus.Infof("Resp: %+v", proxyResp)
+	var respBuf bytes.Buffer
+	respBody := io.TeeReader(proxyResp.Body, &respBuf)
 
 	// copy response header to writer
 	maps.Copy(w.Header(), proxyResp.Header)
 	w.WriteHeader(proxyResp.StatusCode)
 
-	_, err = io.Copy(w, proxyResp.Body)
+	_, err = io.Copy(w, respBody)
 	if err != nil {
 		logrus.Error(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	go func() {
+		if !t.pcw.enabled {
+			return
+		}
+		flow := model.BuildPacketCaptureFlow(proxyResp, r, &reqBuf, &respBuf)
+		t.pcw.BroadcastJSON(flow)
+	}()
 }
 
-func NewTLSHandler(certManager *cert.Manager) Handler {
+func NewTLSHandler(certManager *cert.Manager, pcw *PacketCaptureWebSocket) Handler {
 	handler := &tlsHandler{
 		tlsListener: &tlsListener{
 			chConn: make(chan net.Conn),
 		},
 		certManager: certManager,
+		pcw:         pcw,
 	}
 	handler.server = &http.Server{
 		Handler: handler,
