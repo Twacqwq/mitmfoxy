@@ -24,6 +24,9 @@ type Config struct {
 
 	// key file
 	KeyFile string
+
+	// use websocket to recv packet capture
+	UseWebsocket bool
 }
 
 type proxy struct {
@@ -58,7 +61,18 @@ func New(conf *Config) *proxy {
 	p.RegisterProtocolHandler("http", protocol.NewHTTPHandler())
 	p.RegisterProtocolHandler("https", protocol.NewTLSHandler(certManager))
 
-	p.server.Handler = p
+	mux := http.NewServeMux()
+	mux.Handle("/", p)
+	mux.Handle("/ws", protocol.NewPacketCaptureWebsocket(conf.UseWebsocket))
+
+	p.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			p.ServeHTTP(w, r)
+			return
+		}
+
+		mux.ServeHTTP(w, r)
+	})
 	return p
 }
 

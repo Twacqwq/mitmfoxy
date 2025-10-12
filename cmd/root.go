@@ -17,6 +17,9 @@ var (
 
 	// root ca key file
 	keyFile string
+
+	// use websocket to recv packet capture
+	useWebsocket bool
 )
 
 var rootCmd = &cobra.Command{
@@ -24,9 +27,10 @@ var rootCmd = &cobra.Command{
 	Short: "a mitm proxy tools",
 	Run: func(cmd *cobra.Command, args []string) {
 		mitmproxy := proxy.New(&proxy.Config{
-			Addr:     fmt.Sprintf(":%d", port),
-			CertFile: certFile,
-			KeyFile:  keyFile,
+			Addr:         fmt.Sprintf(":%d", port),
+			CertFile:     certFile,
+			KeyFile:      keyFile,
+			UseWebsocket: useWebsocket,
 		})
 
 		if err := mitmproxy.Start(); err != nil {
@@ -43,4 +47,5 @@ func init() {
 	rootCmd.Flags().IntVarP(&port, "port", "p", 8989, "network server port")
 	rootCmd.Flags().StringVarP(&certFile, "cert", "c", "", "root ca cert file")
 	rootCmd.Flags().StringVarP(&keyFile, "key", "k", "", "root ca key file")
+	rootCmd.Flags().BoolVarP(&useWebsocket, "ws", "w", false, "use websocket to recv packet capture")
 }
